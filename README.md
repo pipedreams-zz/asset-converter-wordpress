@@ -9,6 +9,8 @@ A Python script for batch converting images and PDFs into web-optimized formats 
 - **WordPress-Optimized Naming**: Automatic SEO-friendly slug generation
 - **Filename Prefix Support**: Optional prefix for organized file naming (e.g., `abc123-`)
 - **Smart Output Directory**: Defaults to `output-web` subfolder in source directory
+- **Flexible File Overwrite**: Choose to overwrite existing files or create new ones with incremental naming
+- **Advanced Filtering**: Exclude directories by pattern and filter files by name
 - **Smart Image Processing**: Auto-resize, EXIF orientation correction, color mode handling
 - **Large Image Support**: Handles high-resolution images up to 300 megapixels
 - **PDF to Image**: Convert multi-page PDFs to individual images
@@ -48,11 +50,15 @@ You'll be prompted for:
 1. **Source Directory**: Path to input files (default: current directory)
 2. **Output Directory**: Path for converted files (default: `<source-dir>/output-web`)
 3. **Filename Prefix**: Optional prefix for all output files (e.g., `ABC123`)
-4. **File Extensions**: Comma-separated list (default: `tif,jpg,jpeg,png,pdf`)
-5. **Target Format**: Output format - `avif`, `webp`, `png`, or `jpg` (default: `webp`)
-6. **Target Width**: Maximum width in pixels (default: `1920`)
-7. **Quality**: Compression quality 0-100 (default: `80`)
-8. **PDF Zoom**: Rendering resolution for PDFs (default: `2.0` ≈ 144 DPI)
+4. **Overwrite Mode**: Choose to overwrite existing files or create new ones with index
+5. **File Filtering**: Optionally enable advanced filtering
+   - **Directory Exclusion**: Skip directories containing a pattern (e.g., `excl`)
+   - **Filename Pattern**: Only process files containing a pattern (e.g., `_web`)
+6. **File Extensions**: Comma-separated list (default: `tif,jpg,jpeg,png,pdf`)
+7. **Target Format**: Output format - `avif`, `webp`, `png`, or `jpg` (default: `webp`)
+8. **Target Width**: Maximum width in pixels (default: `1920`)
+9. **Quality**: Compression quality 0-100 (default: `80`)
+10. **PDF Zoom**: Rendering resolution for PDFs (default: `2.0` ≈ 144 DPI)
 
 ### Example Session
 
@@ -63,6 +69,13 @@ Quellordner eingeben [.]: /path/to/images
 Zielordner eingeben [/path/to/images/output-web]:
 Dateinamen-Prefix (z.B. ABC123, optional - Enter für keinen) []: PRJ001
   → Normalisierter Prefix: 'prj001-'
+Existierende Dateien im Zielordner überschreiben? (y/n) [n]: n
+  → Bei Namenskollisionen werden neue Dateien mit Index erstellt (-001, -002, ...)
+Datei-Filter aktivieren? (y/n) [n]: y
+Verzeichnisse ausschließen mit Muster [...] []: backup
+  → Verzeichnisse mit 'backup' werden übersprungen
+Nur Dateien verarbeiten mit Muster im Namen [...] []: _web
+  → Nur Dateien mit '_web' im Namen werden verarbeitet
 Dateimuster (Komma-getrennt), z.B. tif,jpg,png,pdf [tif,jpg,jpeg,png,pdf]: png,jpg
 Zielformat (avif/webp/png/jpg) [webp]: webp
 Ziel-Bildbreite in Pixel (Höhe proportional) [1920]: 1920
@@ -97,6 +110,37 @@ The script automatically converts filenames to WordPress-compatible slugs:
 - Normalized to: `abc123-` or `project42-`
 - Smart detection: won't duplicate if filename already has the prefix
 - Press Enter to skip prefix (optional)
+
+### File Overwrite Control
+
+Choose how to handle existing files in the output directory:
+
+**Overwrite Mode (y):**
+- Existing files are replaced with newly converted versions
+- Useful for refreshing an entire output directory
+- Example: `photo.webp` exists → overwrites `photo.webp`
+
+**Keep Mode (n - default):**
+- Creates new files with incremental suffixes on name collision
+- Preserves existing files in the output directory
+- Example: `photo.webp` exists → creates `photo-001.webp`
+- Further collisions create `photo-002.webp`, `photo-003.webp`, etc.
+
+### Advanced Filtering
+
+Optional filtering system to control which files are processed:
+
+**Directory Exclusion:**
+- Skip directories containing a specific pattern in their path
+- Case-insensitive matching
+- Example: Pattern `backup` skips `/photos/backup/`, `/backup-2024/`, etc.
+- Press Enter to skip directory filtering (processes all directories)
+
+**Filename Pattern:**
+- Only process files containing a specific pattern in their name
+- Case-insensitive matching
+- Example: Pattern `_web` only processes `photo_web.jpg`, `image_web_final.png`
+- Press Enter to skip filename filtering (processes all matching files)
 
 ### Image Processing
 

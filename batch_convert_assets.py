@@ -184,27 +184,37 @@ def page_suffix(idx: int) -> str:
     # -p001, -p002 ...
     return f"-p{idx:03d}"
 
-def unique_target_path(base_dir: Path, base_name: str, ext: str, taken: Dict[str, int]) -> Path:
+def unique_target_path(base_dir: Path, base_name: str, ext: str, taken: Dict[str, int], overwrite: bool = False) -> Path:
     """
     base_name ist bereits slugified und ohne Erweiterung.
     - Erstes Vorkommen: {base_name}{ext}
-    - Kollisionen: {base_name}-001{ext}, -002, ...
+    - Kollisionen (wenn overwrite=False): {base_name}-001{ext}, -002, ...
+    - Überschreiben (wenn overwrite=True): Existierende Datei wird überschrieben
     """
     candidate = f"{base_name}{ext}"
-    if candidate not in taken:
-        taken[candidate] = 0
-        return base_dir / candidate
-    # bereits vorhanden -> hochzählen
-    taken[candidate] += 1
-    num = taken[candidate]
-    candidate2 = f"{base_name}-{num:03d}{ext}"
-    # Sicherheit: falls auch das schon existiert (z. B. wegen Laufstart), schleife weiter
-    while (base_dir / candidate2).exists():
-        num += 1
+    candidate_path = base_dir / candidate
+
+    if overwrite:
+        # Überschreiben-Modus: Existierende Dateien werden ersetzt
+        if candidate not in taken:
+            taken[candidate] = 0
+        return candidate_path
+    else:
+        # Inkrementier-Modus: Bei Kollision neue Datei mit Index erstellen
+        if candidate not in taken:
+            taken[candidate] = 0
+            return candidate_path
+        # bereits vorhanden -> hochzählen
+        taken[candidate] += 1
+        num = taken[candidate]
         candidate2 = f"{base_name}-{num:03d}{ext}"
-    # den Zähler für den Basisschlüssel merken
-    taken[candidate] = num
-    return base_dir / candidate2
+        # Sicherheit: falls auch das schon existiert (z. B. wegen Laufstart), schleife weiter
+        while (base_dir / candidate2).exists():
+            num += 1
+            candidate2 = f"{base_name}-{num:03d}{ext}"
+        # den Zähler für den Basisschlüssel merken
+        taken[candidate] = num
+        return base_dir / candidate2
 
 def convert_image_file(
     src_path: Path,
@@ -214,6 +224,7 @@ def convert_image_file(
     quality: int,
     taken: Dict[str, int],
     prefix: str = "",
+    overwrite: bool = False,
 ):
     im = load_image_fix_orientation(src_path)
     w, h = compute_new_size(im, target_width)
@@ -223,7 +234,7 @@ def convert_image_file(
     base_slug = wp_slugify(src_path.stem)
     base_slug = ensure_prefix(base_slug, prefix)
     ext = "." + out_fmt.lower().replace("jpeg", "jpg")
-    out_path = unique_target_path(out_dir, base_slug, ext, taken)
+    out_path = unique_target_path(out_dir, base_slug, ext, taken, overwrite)
     save_image(im, out_path, out_fmt, quality)
     print(f"OK: {src_path}  ->  {out_path}")
 
@@ -236,6 +247,7 @@ def convert_pdf_file(
     taken: Dict[str, int],
     pdf_zoom: float = 2.0,  # ~ 144 DPI (72 * 2)
     prefix: str = "",
+    overwrite: bool = False,
 ):
     if not PYMUPDF_AVAILABLE:
         raise RuntimeError(
@@ -263,12 +275,34 @@ def convert_pdf_file(
         candidate_key = f"{base_with_page}{ext}"
         if candidate_key not in taken:
             taken[candidate_key] = 0  # separat zählen je Seite
-        out_path = unique_target_path(out_dir, base_with_page, ext, taken)
+        out_path = unique_target_path(out_dir, base_with_page, ext, taken, overwrite)
         save_image(im, out_path, out_fmt, quality)
         print(f"OK: {src_path} [Seite {i}]  ->  {out_path}")
 
     doc.close()
 
+
+def should_skip_directory(dir_path: Path, exclude_pattern: str) -> bool:
+    """
+    Prüft, ob ein Verzeichnis übersprungen werden soll.
+    Gibt True zurück, wenn exclude_pattern in einem der Verzeichnisnamen vorkommt.
+    """
+    if not exclude_pattern:
+        return False
+    # Prüfe alle Teile des Pfades auf das Ausschlussmuster
+    for part in dir_path.parts:
+        if exclude_pattern.lower() in part.lower():
+            return True
+    return False
+
+def should_include_file(file_path: Path, filename_pattern: str) -> bool:
+    """
+    Prüft, ob eine Datei basierend auf dem Dateinamen-Muster inkludiert werden soll.
+    Gibt True zurück, wenn filename_pattern im Dateinamen (ohne Extension) vorkommt.
+    """
+    if not filename_pattern:
+        return True  # Kein Filter = alle Dateien
+    return filename_pattern.lower() in file_path.stem.lower()
 
 def walk_and_convert(
     in_dir: Path,
@@ -279,32 +313,53 @@ def walk_and_convert(
     quality: int,
     pdf_zoom: float,
     prefix: str = "",
+    exclude_dir_pattern: str = "",
+    filename_pattern: str = "",
+    overwrite: bool = False,
 ):
     ensure_output_dir(out_dir)
 
     exts = tuple(e.lower() for e in include_exts)
     taken: Dict[str, int] = {}
+    skipped_dirs = set()
+    skipped_files = 0
 
     for src in in_dir.rglob("*"):
         if not src.is_file():
             continue
+
+        # Verzeichnis-Filter: Überspringe Dateien in ausgeschlossenen Verzeichnissen
+        if exclude_dir_pattern and should_skip_directory(src.parent, exclude_dir_pattern):
+            if src.parent not in skipped_dirs:
+                print(f"Überspringe Verzeichnis: {src.parent}")
+                skipped_dirs.add(src.parent)
+            continue
+
         ext = src.suffix.lower()
         if ext not in exts:
+            continue
+
+        # Dateinamen-Filter: Überspringe Dateien ohne das gewünschte Muster
+        if filename_pattern and not should_include_file(src, filename_pattern):
+            skipped_files += 1
             continue
 
         try:
             if ext in SUPPORTED_PDF_EXTS:
                 convert_pdf_file(
-                    src, out_dir, out_fmt, target_width, quality, taken, pdf_zoom=pdf_zoom, prefix=prefix
+                    src, out_dir, out_fmt, target_width, quality, taken, pdf_zoom=pdf_zoom, prefix=prefix, overwrite=overwrite
                 )
             elif ext in SUPPORTED_IMAGE_EXTS:
                 convert_image_file(
-                    src, out_dir, out_fmt, target_width, quality, taken, prefix=prefix
+                    src, out_dir, out_fmt, target_width, quality, taken, prefix=prefix, overwrite=overwrite
                 )
             else:
                 print(f"Übersprungen (nicht unterstützt): {src}")
         except Exception as e:
             print(f"FEHLER bei {src}: {e}")
+
+    if skipped_files > 0:
+        print(f"\nÜbersprungene Dateien (Dateinamen-Filter): {skipped_files}")
 
 
 def main():
@@ -327,6 +382,28 @@ def main():
         print(f"  → Normalisierter Prefix: '{prefix}'")
     elif prefix_input and not prefix:
         print("  → Warnung: Prefix enthält keine gültigen Zeichen und wird ignoriert.")
+
+    # Überschreiben-Modus abfragen
+    overwrite_choice = ask("Existierende Dateien im Zielordner überschreiben? (y/n)", "n").lower()
+    overwrite = overwrite_choice == "y"
+    if overwrite:
+        print("  → Existierende Dateien werden überschrieben")
+    else:
+        print("  → Bei Namenskollisionen werden neue Dateien mit Index erstellt (-001, -002, ...)")
+
+    # Filter-Optionen abfragen
+    use_filters = ask("Datei-Filter aktivieren? (y/n)", "n").lower()
+    exclude_dir_pattern = ""
+    filename_pattern = ""
+
+    if use_filters == "y":
+        exclude_dir_pattern = ask("Verzeichnisse ausschließen mit Muster (z.B. 'excl' für alle Ordner mit 'excl' im Namen, Enter für keinen)", "")
+        if exclude_dir_pattern:
+            print(f"  → Verzeichnisse mit '{exclude_dir_pattern}' werden übersprungen")
+
+        filename_pattern = ask("Nur Dateien verarbeiten mit Muster im Namen (z.B. '_web', Enter für alle)", "")
+        if filename_pattern:
+            print(f"  → Nur Dateien mit '{filename_pattern}' im Namen werden verarbeitet")
 
     include = ask("Dateimuster (Komma-getrennt), z.B. tif,jpg,png,pdf", "tif,jpg,jpeg,png,pdf")
     include_exts = parse_ext_list(include)
@@ -375,6 +452,9 @@ def main():
         quality=quality,
         pdf_zoom=pdf_zoom,
         prefix=prefix,
+        exclude_dir_pattern=exclude_dir_pattern,
+        filename_pattern=filename_pattern,
+        overwrite=overwrite,
     )
     print("\nFertig.")
 
