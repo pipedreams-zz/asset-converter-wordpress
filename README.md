@@ -86,8 +86,6 @@ This will:
 ![Conversion Progress](docs/screenshots/web-gui-progress.png)
 *Real-time conversion status with detailed file processing information*
 
-> **Note:** To add screenshots later, create a `docs/screenshots/` directory and add your images with these filenames.
-
 ### Command Line Interface
 
 For automation, scripting, or terminal workflows:

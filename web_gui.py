@@ -623,6 +623,6 @@ if __name__ == "__main__":
     app.launch(
         server_name="0.0.0.0",  # Allow network access
         server_port=7860,
-        share=False,  # Set to True for public URL
+        share=True,  # Set to True for public URL
         inbrowser=True,  # Auto-open browser
     )
