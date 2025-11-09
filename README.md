@@ -1,6 +1,6 @@
 # Batch Asset Converter for WordPress
 
-A Python script for batch converting images and PDFs into web-optimized formats with WordPress-friendly filenames.
+A Python tool for batch converting images and PDFs into web-optimized formats with WordPress-friendly filenames. Available as both a command-line interface and a user-friendly web GUI.
 
 ## Features
 
@@ -16,30 +16,81 @@ A Python script for batch converting images and PDFs into web-optimized formats 
 - **PDF to Image**: Convert multi-page PDFs to individual images
 - **Collision-Safe**: Automatic handling of duplicate filenames
 - **Quality Control**: Configurable compression and quality settings
+- **Dual Interface**: Choose between CLI or Web GUI
 
 ## Installation
 
-### Requirements
+### Basic Installation (CLI Only)
+
+Install core dependencies for command-line usage:
 
 ```bash
-pip install Pillow
+pip install -r requirements.txt
 ```
 
-### Optional Dependencies
+### Full Installation (CLI + Web GUI)
 
-For AVIF support:
+Install all dependencies including the web interface:
+
 ```bash
-pip install pillow-avif-plugin
+pip install -r requirements.txt -r requirements-gui.txt
 ```
 
-For PDF conversion:
+### Manual Installation
+
+Core dependencies:
 ```bash
-pip install pymupdf
+pip install Pillow pymupdf pillow-avif-plugin
+```
+
+For web GUI, additionally install:
+```bash
+pip install gradio
 ```
 
 ## Usage
 
-Run the script interactively:
+### Web Interface (Recommended for Most Users)
+
+Launch the web GUI for an intuitive, visual experience:
+
+```bash
+python web_gui.py
+```
+
+This will:
+- Start a local web server (default: `http://localhost:7860`)
+- Automatically open the interface in your default browser
+- Provide real-time conversion progress updates
+- Include folder browser dialogs for easy path selection
+
+**Features:**
+- Visual folder selection with browse buttons
+- Real-time conversion status display
+- Light/dark mode toggle
+- All CLI features accessible through the GUI
+- Responsive design with monochrome theme
+
+<!-- Screenshot placeholders - Add your screenshots here -->
+#### Screenshots
+
+**Light Mode:**
+![Web GUI Light Mode](docs/screenshots/web-gui-light.png)
+*Web interface in light mode showing conversion settings and real-time status*
+
+**Dark Mode:**
+![Web GUI Dark Mode](docs/screenshots/web-gui-dark.png)
+*Web interface in dark mode with inverted logo and theme colors*
+
+**Conversion in Progress:**
+![Conversion Progress](docs/screenshots/web-gui-progress.png)
+*Real-time conversion status with detailed file processing information*
+
+> **Note:** To add screenshots later, create a `docs/screenshots/` directory and add your images with these filenames.
+
+### Command Line Interface
+
+For automation, scripting, or terminal workflows:
 
 ```bash
 python batch_convert_assets.py
@@ -60,7 +111,7 @@ You'll be prompted for:
 9. **Quality**: Compression quality 0-100 (default: `80`)
 10. **PDF Zoom**: Rendering resolution for PDFs (default: `2.0` ≈ 144 DPI)
 
-### Example Session
+#### Example CLI Session
 
 ```
 === Batch-Konverter: TIF/JPG/PNG/PDF -> AVIF/WEBP/PNG/JPG (WordPress-optimierte Namen) ===
@@ -164,15 +215,19 @@ Optional filtering system to control which files are processed:
 
 All converted files are placed in the output directory with flat structure (no subdirectories), making them easy to bulk upload to WordPress media library.
 
-## Error Handling
-
-The script will:
-- Skip unsupported file types
-- Continue processing if individual files fail
-- Display error messages for failed conversions
-- Warn if optional dependencies are missing
-
 ## Technical Details
+
+### Project Structure
+
+```
+batch_convert_wp/
+├── batch_convert_assets.py    # Core conversion engine (CLI)
+├── web_gui.py                  # Web interface (Gradio)
+├── requirements.txt            # Core dependencies
+├── requirements-gui.txt        # GUI dependencies
+├── README.md                   # This file
+└── .gitignore                  # Git ignore rules
+```
 
 ### Supported Input Formats
 - Images: `.jpg`, `.jpeg`, `.png`, `.tif`, `.tiff`, `.bmp`, `.gif`
@@ -188,10 +243,16 @@ The script will:
 - Larger zoom values for PDFs result in better quality but larger files
 - Quality 80-85 offers good balance for WebP/AVIF
 - Use WebP for broad compatibility, AVIF for maximum compression
+- Web GUI shows real-time progress in both the interface and console
 
-## License
+## Error Handling
 
-This script is provided as-is for personal and commercial use.
+The tool will:
+- Skip unsupported file types
+- Continue processing if individual files fail
+- Display error messages for failed conversions
+- Warn if optional dependencies are missing
+- Show detailed error traces in the web GUI
 
 ## Troubleshooting
 
@@ -204,6 +265,9 @@ Install AVIF plugin: `pip install pillow-avif-plugin`
 ### "PDF-Konvertierung benötigt PyMuPDF"
 Install PyMuPDF: `pip install pymupdf`
 
+### Web GUI won't start
+Make sure Gradio is installed: `pip install gradio`
+
 ### Images appear rotated
 The script automatically handles EXIF orientation. If images still appear rotated, the source file may have incorrect metadata.
 
@@ -213,10 +277,21 @@ Increase the quality parameter (recommended: 85-95 for important images)
 ### DecompressionBombWarning for large images
 The script handles images up to 300 megapixels. If you need to process even larger images, this limit can be adjusted in the code.
 
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+**TL;DR:** You can use, modify, and distribute this software freely, even for commercial purposes. Just keep the copyright notice and attribution.
+
 ## Contributing
 
-Feel free to modify and extend this script for your needs. Common enhancements:
+Feel free to modify and extend this tool for your needs. Common enhancements:
 - Add command-line argument support
 - Implement parallel processing for faster conversion
 - Add watermarking capabilities
 - Support additional metadata preservation
+- Extend the web GUI with additional features
+
+## Credits
+
+Developed with focus on WordPress media library optimization and user-friendly batch processing.

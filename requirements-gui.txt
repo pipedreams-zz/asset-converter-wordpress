@@ -1,0 +1,2 @@
+# Additional dependencies for web GUI
+gradio>=4.0.0
