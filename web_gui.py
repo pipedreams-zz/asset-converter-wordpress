@@ -423,6 +423,9 @@ with gr.Blocks(
         </div>
 
         <p>Konvertiere Bilder und PDFs in web-optimierte Formate mit WordPress-freundlichen Dateinamen.</p>
+
+        > **💡 Hinweis für Remote-Zugriff:** Bei Zugriff über Netzwerk öffnet "Durchsuchen" den Dialog auf dem **Server**.
+        > Geben Sie stattdessen den Pfad **auf dem Server** direkt in die Textfelder ein (z.B. `/pfad/zum/ordner` oder `C:\\Ordner\\Projekt`).
         """
     )
 
@@ -432,20 +435,20 @@ with gr.Blocks(
 
             with gr.Row():
                 source_dir = gr.Textbox(
-                    label="Quellordner",
-                    placeholder="z.B. C:\\Bilder\\Projekt",
+                    label="Quellordner (Pfad auf dem Server)",
+                    placeholder="z.B. C:\\Bilder\\Projekt oder /home/user/bilder",
                     value=".",
-                    info="Ordner mit den zu konvertierenden Dateien",
+                    info="Ordner mit den zu konvertierenden Dateien (Server-Pfad bei Remote-Zugriff)",
                     scale=4
                 )
                 source_btn = gr.Button("Durchsuchen", scale=1, size="sm")
 
             with gr.Row():
                 output_dir = gr.Textbox(
-                    label="Zielordner (optional)",
+                    label="Zielordner (optional, Pfad auf dem Server)",
                     placeholder="Leer lassen für automatisch: <Quelle>/output-web",
                     value="",
-                    info="Ausgabeordner für konvertierte Dateien",
+                    info="Ausgabeordner für konvertierte Dateien (Server-Pfad bei Remote-Zugriff)",
                     scale=4
                 )
                 output_btn = gr.Button("Durchsuchen", scale=1, size="sm")
@@ -596,12 +599,14 @@ with gr.Blocks(
         """
         ---
         💡 **Tipps:**
-        - Quellordner kann relativ (`.`) oder absolut sein (`C:\\Bilder`)
+        - **Lokaler Zugriff:** "Durchsuchen"-Button öffnet Ordner-Dialog
+        - **Remote-Zugriff:** Pfade direkt eingeben (immer **Server-Pfade**, nicht Client-Pfade!)
+        - Quellordner kann relativ (`.`) oder absolut sein (`C:\\Bilder`, `/home/user/bilder`)
         - Prefix wird automatisch normalisiert (Kleinbuchstaben, alphanumerisch)
         - Filter sind optional und case-insensitive
         - WebP bietet die beste Balance zwischen Qualität und Größe
 
-        📚 [GitHub Repository](https://github.com/pipedreams-zz/batch_convert_wordpress)
+        📚 [GitHub Repository](https://github.com/pipedreams-zz/asset-converter-wordpress)
         """
     )
 
@@ -623,6 +628,6 @@ if __name__ == "__main__":
     app.launch(
         server_name="0.0.0.0",  # Allow network access
         server_port=7860,
-        share=True,  # Set to True for public URL
+        share=False,  # Set to True for public URL
         inbrowser=True,  # Auto-open browser
     )

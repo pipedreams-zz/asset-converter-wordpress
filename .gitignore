@@ -37,3 +37,4 @@ Thumbs.db
 # Project specific
 output-web/
 *.log
+.gradio/

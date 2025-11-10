@@ -65,7 +65,9 @@ This will:
 - Include folder browser dialogs for easy path selection
 
 **Features:**
-- Visual folder selection with browse buttons
+- Visual folder selection with browse buttons (for local access)
+- **Network access supported**: Access from other machines on your network at `http://<server-ip>:7860`
+- Remote users enter server paths directly (browse button opens dialog on server)
 - Real-time conversion status display
 - Light/dark mode toggle
 - All CLI features accessible through the GUI
