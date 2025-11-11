@@ -84,6 +84,7 @@ def convert_batch(
     output_dir: str,
     prefix: str,
     overwrite: bool,
+    force_white_bg: bool,
     enable_filters: bool,
     exclude_dir_pattern: str,
     filename_pattern: str,
@@ -137,6 +138,7 @@ def convert_batch(
             status_parts.append(f"🏷️ Prefix: '{normalized_prefix}'")
 
         status_parts.append(f"📝 Modus: {'Überschreiben' if overwrite else 'Neue Dateien mit Index'}")
+        status_parts.append(f"🎨 Transparenz: {'Weißer Hintergrund' if force_white_bg else 'Erhalten'}")
 
         if enable_filters:
             if dir_filter:
@@ -182,6 +184,7 @@ def convert_batch(
                     exclude_dir_pattern=dir_filter,
                     filename_pattern=file_filter,
                     overwrite=overwrite,
+                    force_white_bg=force_white_bg,
                 )
             except Exception as e:
                 conversion_error = e
@@ -347,14 +350,17 @@ with gr.Blocks(
     js="""
         function() {
             // Auto-scroll to status output when conversion starts
+            let hasScrolledOnce = false;
             const observer = new MutationObserver((mutations) => {
                 mutations.forEach((mutation) => {
-                    if (mutation.type === 'characterData' || mutation.type === 'childList') {
+                    if (mutation.type === 'characterData' || mutation.type === 'childList' || mutation.type === 'attributes') {
                         const statusElement = document.querySelector('.scroll-to-output textarea');
                         if (statusElement && statusElement.value && statusElement.value.length > 0) {
-                            statusElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            // Disconnect after first scroll to avoid repeated scrolling
-                            observer.disconnect();
+                            // Scroll to status box on first content update
+                            if (!hasScrolledOnce) {
+                                statusElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                hasScrolledOnce = true;
+                            }
                         }
                     }
                 });
@@ -433,25 +439,21 @@ with gr.Blocks(
         with gr.Column(scale=1):
             gr.Markdown("### Verzeichnisse")
 
-            with gr.Row():
-                source_dir = gr.Textbox(
-                    label="Quellordner (Pfad auf dem Server)",
-                    placeholder="z.B. C:\\Bilder\\Projekt oder /home/user/bilder",
-                    value=".",
-                    info="Ordner mit den zu konvertierenden Dateien (Server-Pfad bei Remote-Zugriff)",
-                    scale=4
-                )
-                source_btn = gr.Button("Durchsuchen", scale=1, size="sm")
+            source_dir = gr.Textbox(
+                label="Quellordner (Pfad auf dem Server)",
+                placeholder="z.B. C:\\Bilder\\Projekt oder /home/user/bilder",
+                value="",
+                info="Ordner mit den zu konvertierenden Dateien (Server-Pfad bei Remote-Zugriff)"
+            )
+            source_btn = gr.Button("📁 Durchsuchen", size="sm")
 
-            with gr.Row():
-                output_dir = gr.Textbox(
-                    label="Zielordner (optional, Pfad auf dem Server)",
-                    placeholder="Leer lassen für automatisch: <Quelle>/output-web",
-                    value="",
-                    info="Ausgabeordner für konvertierte Dateien (Server-Pfad bei Remote-Zugriff)",
-                    scale=4
-                )
-                output_btn = gr.Button("Durchsuchen", scale=1, size="sm")
+            output_dir = gr.Textbox(
+                label="Zielordner (optional, Pfad auf dem Server)",
+                placeholder="Leer lassen für automatisch: <Quelle>/output-web",
+                value="",
+                info="Ausgabeordner für konvertierte Dateien (Server-Pfad bei Remote-Zugriff)"
+            )
+            output_btn = gr.Button("📁 Durchsuchen", size="sm")
 
             gr.Markdown("### Dateinamen")
             prefix = gr.Textbox(
@@ -464,30 +466,13 @@ with gr.Blocks(
             overwrite = gr.Checkbox(
                 label="Existierende Dateien überschreiben",
                 value=False,
-                info="Wenn deaktiviert: Neue Dateien mit Index (-001, -002, ...)"
+                info="Wenn deaktiviert: Neue Dateien mit Index (-01, -02, ...)"
             )
 
-            gr.Markdown("### Filter")
-            enable_filters = gr.Checkbox(
-                label="Erweiterte Filter aktivieren",
-                value=False,
-                info="Ordner und Dateien filtern"
-            )
-
-            exclude_dir_pattern = gr.Textbox(
-                label="Ordner ausschließen (Muster)",
-                placeholder="z.B. backup, excl, temp",
-                value="",
-                visible=False,
-                info="Ordner mit diesem Muster im Namen überspringen"
-            )
-
-            filename_pattern = gr.Textbox(
-                label="Nur Dateien mit Muster",
-                placeholder="z.B. _web, final",
-                value="",
-                visible=False,
-                info="Nur Dateien mit diesem Muster verarbeiten"
+            force_white_bg = gr.Checkbox(
+                label="Transparenz durch weißen Hintergrund ersetzen",
+                value=True,
+                info="Alpha-Kanal entfernen und durch weißen Hintergrund ersetzen"
             )
 
         with gr.Column(scale=1):
@@ -533,6 +518,29 @@ with gr.Blocks(
                 info="1.0 ≈ 72 DPI, 2.0 ≈ 144 DPI"
             )
 
+            gr.Markdown("### Filter")
+            enable_filters = gr.Checkbox(
+                label="Erweiterte Filter aktivieren",
+                value=False,
+                info="Ordner und Dateien filtern"
+            )
+
+            exclude_dir_pattern = gr.Textbox(
+                label="Ordner ausschließen (Muster, kommagetrennt)",
+                placeholder="z.B. backup,excl,temp",
+                value="",
+                visible=False,
+                info="Ordner mit diesen Mustern im Namen überspringen (mehrere möglich)"
+            )
+
+            filename_pattern = gr.Textbox(
+                label="Nur Dateien mit Muster (kommagetrennt)",
+                placeholder="z.B. _web,final",
+                value="",
+                visible=False,
+                info="Nur Dateien mit diesen Mustern verarbeiten (mehrere möglich)"
+            )
+
     # Folder picker button handlers
     source_btn.click(
         fn=pick_folder,
@@ -559,9 +567,28 @@ with gr.Blocks(
         outputs=[exclude_dir_pattern, filename_pattern]
     )
 
-    # Convert button and output
+    # Reset to defaults function
+    def reset_to_defaults():
+        return {
+            source_dir: gr.update(value=""),
+            output_dir: gr.update(value=""),
+            prefix: gr.update(value=""),
+            overwrite: gr.update(value=False),
+            force_white_bg: gr.update(value=True),
+            enable_filters: gr.update(value=False),
+            exclude_dir_pattern: gr.update(value="", visible=False),
+            filename_pattern: gr.update(value="", visible=False),
+            file_extensions: gr.update(value="tif,jpg,jpeg,png,pdf"),
+            output_format: gr.update(value="webp"),
+            target_width: gr.update(value=1920),
+            quality: gr.update(value=80),
+            pdf_zoom: gr.update(value=2.0),
+        }
+
+    # Convert button and reset button
     with gr.Row():
-        convert_btn = gr.Button("🚀 Konvertierung starten", variant="primary", size="lg")
+        convert_btn = gr.Button("🚀 Konvertierung starten", variant="primary", size="lg", scale=3)
+        reset_btn = gr.Button("🔄 Auf Standard zurücksetzen", size="lg", scale=1)
 
     output_status = gr.Textbox(
         label="Status",
@@ -582,6 +609,7 @@ with gr.Blocks(
             output_dir,
             prefix,
             overwrite,
+            force_white_bg,
             enable_filters,
             exclude_dir_pattern,
             filename_pattern,
@@ -594,6 +622,27 @@ with gr.Blocks(
         outputs=output_status,
     )
 
+    # Wire up the reset button
+    reset_btn.click(
+        fn=reset_to_defaults,
+        inputs=[],
+        outputs=[
+            source_dir,
+            output_dir,
+            prefix,
+            overwrite,
+            force_white_bg,
+            enable_filters,
+            exclude_dir_pattern,
+            filename_pattern,
+            file_extensions,
+            output_format,
+            target_width,
+            quality,
+            pdf_zoom,
+        ]
+    )
+
     # Footer
     gr.Markdown(
         """
@@ -601,10 +650,12 @@ with gr.Blocks(
         💡 **Tipps:**
         - **Lokaler Zugriff:** "Durchsuchen"-Button öffnet Ordner-Dialog
         - **Remote-Zugriff:** Pfade direkt eingeben (immer **Server-Pfade**, nicht Client-Pfade!)
-        - Quellordner kann relativ (`.`) oder absolut sein (`C:\\Bilder`, `/home/user/bilder`)
+        - Quellordner muss angegeben werden (kein Standard mehr)
         - Prefix wird automatisch normalisiert (Kleinbuchstaben, alphanumerisch)
-        - Filter sind optional und case-insensitive
+        - Bei Kollisionen werden Dateien mit `-01`, `-02`, ... erstellt (falls nicht überschreiben)
+        - Filter unterstützen mehrere Muster (kommagetrennt): `backup,temp,test`
         - WebP bietet die beste Balance zwischen Qualität und Größe
+        - Transparenz-Option: Standard ist weißer Hintergrund (deaktivieren für Alpha-Kanal)
 
         📚 [GitHub Repository](https://github.com/pipedreams-zz/asset-converter-wordpress)
         """
