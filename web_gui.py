@@ -20,7 +20,7 @@ from batch_convert_assets import (
     parse_ext_list,
     normalize_prefix,
     AVIF_AVAILABLE,
-    PYMUPDF_AVAILABLE,
+    PDF2IMAGE_AVAILABLE,
 )
 
 
@@ -85,6 +85,8 @@ def convert_batch(
     prefix: str,
     overwrite: bool,
     force_white_bg: bool,
+    preserve_metadata: bool,
+    use_filename_fallback: bool,
     enable_filters: bool,
     exclude_dir_pattern: str,
     filename_pattern: str,
@@ -185,6 +187,8 @@ def convert_batch(
                     filename_pattern=file_filter,
                     overwrite=overwrite,
                     force_white_bg=force_white_bg,
+                    preserve_metadata=preserve_metadata,
+                    use_filename_fallback=use_filename_fallback,
                 )
             except Exception as e:
                 conversion_error = e
@@ -475,6 +479,19 @@ with gr.Blocks(
                 info="Alpha-Kanal entfernen und durch weißen Hintergrund ersetzen"
             )
 
+            gr.Markdown("### Metadaten")
+            preserve_metadata = gr.Checkbox(
+                label="Metadaten aus Quellbildern übernehmen (EXIF/IPTC)",
+                value=True,
+                info="Copyright, Autor, Bildunterschriften usw. in Ausgabebilder übertragen"
+            )
+
+            use_filename_fallback = gr.Checkbox(
+                label="Dateinamen als Bildunterschrift verwenden (Fallback)",
+                value=True,
+                info="Wenn keine Metadaten vorhanden: Dateinamen in lesbarer Form als Caption"
+            )
+
         with gr.Column(scale=1):
             gr.Markdown("### Konvertierungseinstellungen")
 
@@ -492,12 +509,12 @@ with gr.Blocks(
             )
 
             target_width = gr.Slider(
-                label="Ziel-Bildbreite (Pixel)",
+                label="Maximale Größe der längsten Seite (Pixel)",
                 minimum=320,
                 maximum=3840,
                 value=1920,
                 step=80,
-                info="Breite in Pixel (Höhe wird proportional angepasst)"
+                info="Maximale Größe für Breite oder Höhe (jeweils längste Dimension)"
             )
 
             quality = gr.Slider(
@@ -510,12 +527,12 @@ with gr.Blocks(
             )
 
             pdf_zoom = gr.Slider(
-                label="PDF-Render-Zoom",
+                label="PDF-Render-Zoom (Auflösung)",
                 minimum=0.5,
                 maximum=4.0,
-                value=2.0,
+                value=3.0,
                 step=0.1,
-                info="1.0 ≈ 72 DPI, 2.0 ≈ 144 DPI"
+                info="Höherer Wert = schärfere PDFs | 1.0 = 72 DPI, 2.0 = 144 DPI, 3.0 = 216 DPI, 4.0 = 288 DPI"
             )
 
             gr.Markdown("### Filter")
@@ -575,6 +592,8 @@ with gr.Blocks(
             prefix: gr.update(value=""),
             overwrite: gr.update(value=False),
             force_white_bg: gr.update(value=True),
+            preserve_metadata: gr.update(value=True),
+            use_filename_fallback: gr.update(value=True),
             enable_filters: gr.update(value=False),
             exclude_dir_pattern: gr.update(value="", visible=False),
             filename_pattern: gr.update(value="", visible=False),
@@ -582,7 +601,7 @@ with gr.Blocks(
             output_format: gr.update(value="webp"),
             target_width: gr.update(value=1920),
             quality: gr.update(value=80),
-            pdf_zoom: gr.update(value=2.0),
+            pdf_zoom: gr.update(value=3.0),
         }
 
     # Convert button and reset button
@@ -610,6 +629,8 @@ with gr.Blocks(
             prefix,
             overwrite,
             force_white_bg,
+            preserve_metadata,
+            use_filename_fallback,
             enable_filters,
             exclude_dir_pattern,
             filename_pattern,
@@ -632,6 +653,8 @@ with gr.Blocks(
             prefix,
             overwrite,
             force_white_bg,
+            preserve_metadata,
+            use_filename_fallback,
             enable_filters,
             exclude_dir_pattern,
             filename_pattern,
@@ -670,8 +693,8 @@ if __name__ == "__main__":
     # Check optional dependencies
     if not AVIF_AVAILABLE:
         print("⚠️  AVIF-Support nicht verfügbar (pillow-avif-plugin fehlt)")
-    if not PYMUPDF_AVAILABLE:
-        print("⚠️  PDF-Support nicht verfügbar (pymupdf fehlt)")
+    if not PDF2IMAGE_AVAILABLE:
+        print("⚠️  PDF-Support nicht verfügbar (pdf2image/Poppler fehlt)")
 
     print("="*50 + "\n")
 

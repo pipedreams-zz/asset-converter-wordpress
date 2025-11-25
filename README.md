@@ -7,13 +7,15 @@ A Python tool for batch converting images and PDFs into web-optimized formats wi
 - **Multi-format Support**: Convert TIF, JPG, PNG, BMP, GIF, and PDF files
 - **Modern Output Formats**: AVIF, WebP, PNG, or JPG
 - **WordPress-Optimized Naming**: Automatic SEO-friendly slug generation
+- **Metadata Preservation**: Preserve EXIF and IPTC metadata (copyright, author, captions) from source images
+- **Smart Caption Fallback**: Automatically use readable filenames as IPTC captions when no metadata exists
 - **Filename Prefix Support**: Optional prefix for organized file naming (e.g., `abc123-`)
 - **Smart Output Directory**: Defaults to `output-web` subfolder in source directory
 - **Flexible File Overwrite**: Choose to overwrite existing files or create new ones with incremental naming
 - **Advanced Filtering**: Exclude directories by pattern and filter files by name
 - **Smart Image Processing**: Auto-resize, EXIF orientation correction, color mode handling
 - **Large Image Support**: Handles high-resolution images up to 300 megapixels
-- **PDF to Image**: Convert multi-page PDFs to individual images
+- **PDF to Image**: Convert multi-page PDFs with proper CMYK → sRGB color conversion
 - **Collision-Safe**: Automatic handling of duplicate filenames
 - **Quality Control**: Configurable compression and quality settings
 - **Dual Interface**: Choose between CLI or Web GUI
@@ -40,8 +42,14 @@ pip install -r requirements.txt -r requirements-gui.txt
 
 Core dependencies:
 ```bash
-pip install Pillow pymupdf pillow-avif-plugin
+pip install Pillow pdf2image pillow-avif-plugin piexif iptcinfo3
 ```
+
+**Important**: pdf2image requires Poppler to be installed separately:
+
+- **Windows**: Download Poppler binaries from [poppler-windows releases](https://github.com/oschwartz10612/poppler-windows/releases/) and add the `bin/` folder to your PATH
+- **Linux**: `sudo apt-get install poppler-utils`
+- **macOS**: `brew install poppler`
 
 For web GUI, additionally install:
 ```bash
@@ -102,14 +110,21 @@ You'll be prompted for:
 2. **Output Directory**: Path for converted files (default: `<source-dir>/output-web`)
 3. **Filename Prefix**: Optional prefix for all output files (e.g., `ABC123`)
 4. **Overwrite Mode**: Choose to overwrite existing files or create new ones with index
-5. **File Filtering**: Optionally enable advanced filtering
+5. **White Background**: Replace transparency with white background (default: yes)
+6. **File Filtering**: Optionally enable advanced filtering
    - **Directory Exclusion**: Skip directories containing a pattern (e.g., `excl`)
    - **Filename Pattern**: Only process files containing a pattern (e.g., `_web`)
-6. **File Extensions**: Comma-separated list (default: `tif,jpg,jpeg,png,pdf`)
-7. **Target Format**: Output format - `avif`, `webp`, `png`, or `jpg` (default: `webp`)
-8. **Target Width**: Maximum width in pixels (default: `1920`)
-9. **Quality**: Compression quality 0-100 (default: `80`)
-10. **PDF Zoom**: Rendering resolution for PDFs (default: `2.0` ≈ 144 DPI)
+7. **File Extensions**: Comma-separated list (default: `tif,jpg,jpeg,png,pdf`)
+8. **Target Format**: Output format - `avif`, `webp`, `png`, or `jpg` (default: `webp`)
+9. **Target Size**: Maximum size for longest dimension in pixels (default: `1920`)
+   - Applies to whichever dimension is longer (width or height)
+   - Portrait images: 1440×1920, Landscape images: 1920×1080, etc.
+10. **Quality**: Compression quality 0-100 (default: `80`)
+11. **PDF Zoom**: Rendering resolution for PDFs (default: `3.0` = 216 DPI)
+   - Higher values = sharper PDFs but larger file sizes
+   - 1.0 = 72 DPI, 2.0 = 144 DPI, 3.0 = 216 DPI, 4.0 = 288 DPI
+12. **Metadata Preservation**: Preserve EXIF/IPTC metadata from source images (default: yes)
+13. **Filename Fallback**: Use readable filename as caption when no metadata exists (default: yes)
 
 #### Example CLI Session
 
@@ -129,9 +144,10 @@ Nur Dateien verarbeiten mit Muster im Namen [...] []: _web
   → Nur Dateien mit '_web' im Namen werden verarbeitet
 Dateimuster (Komma-getrennt), z.B. tif,jpg,png,pdf [tif,jpg,jpeg,png,pdf]: png,jpg
 Zielformat (avif/webp/png/jpg) [webp]: webp
-Ziel-Bildbreite in Pixel (Höhe proportional) [1920]: 1920
+Maximale Größe der längsten Seite in Pixel (Breite oder Höhe) [1920]: 1920
 Qualität (0-100, höher = besser; PNG ignoriert es) [80]: 85
-PDF-Render-Zoom (1.0 ≈ 72 DPI, 2.0 ≈ 144 DPI) [2.0]: 2.0
+PDF-Render-Zoom (1.0 = 72 DPI, 2.0 = 144 DPI, 3.0 = 216 DPI) - höher = schärfer [3.0]: 3.0
+  → PDF wird mit 216 DPI gerendert
 
 Starte Verarbeitung …
 ```
@@ -195,21 +211,30 @@ Optional filtering system to control which files are processed:
 
 ### Image Processing
 
-- **Auto-resize**: Images wider than target width are scaled down proportionally
+- **Smart resize**: Target size applies to longest dimension (width or height)
+  - Portrait images (1440×2560) → 1440×1920 at target 1920
+  - Landscape images (2560×1440) → 1920×1080 at target 1920
+  - Both dimensions fit within the target constraint
 - **EXIF correction**: Automatically fixes image orientation based on EXIF data
+- **Metadata preservation**: Preserves EXIF (camera info, dates) and IPTC (copyright, author, captions) metadata
+- **Smart caption fallback**: Converts filenames to readable captions when no metadata exists
+  - Removes 6-digit dates in YYMMDD format (e.g., `project-251106-photo` → `Project Photo`)
+  - Capitalizes first 3 letters for project codes (e.g., `hrk-interior` → `HRK Interior`)
+  - General example: `my-vacation-photo` → `My Vacation Photo`
 - **Color mode handling**: Converts CMYK to RGB, handles transparency appropriately
 - **Format-specific optimization**:
-  - **JPG**: Progressive encoding, 4:2:0 chroma subsampling, optimize flag
-  - **PNG**: Compression level 6
-  - **WebP**: Method 6 for better compression
-  - **AVIF**: Quality-based encoding
+  - **JPG**: Progressive encoding, 4:2:0 chroma subsampling, optimize flag, EXIF/IPTC metadata
+  - **PNG**: Compression level 6, EXIF metadata
+  - **WebP**: Method 6 for better compression, EXIF metadata
+  - **AVIF**: Quality-based encoding, EXIF metadata
 
 ### PDF Conversion
 
 - Each PDF page becomes a separate image file
 - Naming convention: `filename-p001.webp`, `filename-p002.webp`, etc.
 - Configurable rendering resolution (zoom factor)
-- Supports both RGB and RGBA rendering
+- **Proper CMYK → sRGB color conversion** using Poppler for accurate colors
+- Handles both standard RGB PDFs and CMYK print PDFs correctly
 
 ## Output Structure
 
@@ -231,16 +256,24 @@ batch_convert_wp/
 
 ### Supported Input Formats
 - Images: `.jpg`, `.jpeg`, `.png`, `.tif`, `.tiff`, `.bmp`, `.gif`
-- Documents: `.pdf` (requires PyMuPDF)
+- Documents: `.pdf` (requires pdf2image and Poppler)
 
 ### Supported Output Formats
 - **AVIF**: Modern, highly compressed (requires pillow-avif-plugin)
-- **WebP**: Modern, good browser support
+- **WebP**: Modern, good browser support (recommended)
 - **PNG**: Lossless, best for graphics with transparency
 - **JPG**: Lossy, universal compatibility
 
+### Dependencies
+- **Pillow**: Core image processing
+- **pdf2image**: PDF rendering (requires Poppler binaries)
+- **pillow-avif-plugin**: AVIF format support
+- **piexif**: EXIF metadata handling
+- **iptcinfo3**: IPTC metadata handling
+- **gradio**: Web GUI (optional)
+
 ### Performance Tips
-- Larger zoom values for PDFs result in better quality but larger files
+- **PDF Zoom**: Higher values (3.0-4.0) produce sharper PDFs but larger files. Default 3.0 (216 DPI) is recommended for web use
 - Quality 80-85 offers good balance for WebP/AVIF
 - Use WebP for broad compatibility, AVIF for maximum compression
 - Web GUI shows real-time progress in both the interface and console
@@ -262,8 +295,20 @@ Install Pillow: `pip install Pillow`
 ### "AVIF wird nicht unterstützt"
 Install AVIF plugin: `pip install pillow-avif-plugin`
 
-### "PDF-Konvertierung benötigt PyMuPDF"
-Install PyMuPDF: `pip install pymupdf`
+### "PDF-Konvertierung benötigt pdf2image und Poppler"
+1. Install pdf2image: `pip install pdf2image`
+2. Install Poppler binaries:
+   - **Windows**: Download from [poppler-windows releases](https://github.com/oschwartz10612/poppler-windows/releases/), extract, and add `bin/` folder to PATH
+   - **Linux**: `sudo apt-get install poppler-utils`
+   - **macOS**: `brew install poppler`
+
+### PDF colors look wrong or pale
+This should be fixed with the Poppler-based implementation. If you still see color issues:
+- Ensure you're using the latest version of poppler-utils
+- Check that the PDF isn't using unusual color profiles
+
+### Metadata not preserved
+Make sure piexif and iptcinfo3 are installed: `pip install piexif iptcinfo3`
 
 ### Web GUI won't start
 Make sure Gradio is installed: `pip install gradio`

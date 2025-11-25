@@ -24,12 +24,26 @@ try:
 except Exception:
     AVIF_AVAILABLE = False
 
-# PDF support via PyMuPDF
+# PDF support via pdf2image (Poppler)
 try:
-    import fitz  # PyMuPDF
-    PYMUPDF_AVAILABLE = True
+    from pdf2image import convert_from_path
+    PDF2IMAGE_AVAILABLE = True
 except Exception:
-    PYMUPDF_AVAILABLE = False
+    PDF2IMAGE_AVAILABLE = False
+
+# Metadata support (EXIF and IPTC)
+try:
+    import piexif
+    from piexif import ImageIFD, ExifIFD
+    PIEXIF_AVAILABLE = True
+except Exception:
+    PIEXIF_AVAILABLE = False
+
+try:
+    from iptcinfo3 import IPTCInfo
+    IPTC_AVAILABLE = True
+except Exception:
+    IPTC_AVAILABLE = False
 
 
 # ------------------------------
@@ -92,6 +106,148 @@ def ensure_prefix(slug: str, prefix: str) -> str:
 
 
 # ------------------------------
+# Metadata handling
+# ------------------------------
+def filename_to_readable(filename: str) -> str:
+    """
+    Convert slugified filename back to readable form.
+    Example: 'wkb-vacation-photo-251124' -> 'WKB Vacation Photo'
+    First three letters are capitalized, rest follows normal capitalization.
+    Removes dates in 6-digit format (e.g., 251124 as YYMMDD or DDMMYY).
+    """
+    # Remove common suffixes and numbers
+    name = re.sub(r'-\d+$', '', filename)  # Remove trailing numbers like -01
+    name = re.sub(r'-p\d+$', '', name)     # Remove page numbers like -p001
+
+    # Remove date patterns in 6-digit format (YYMMDD like 240430 or DDMMYY like 300424)
+    # Dates typically appear after the project code: projectcode-YYMMDD-description
+    # Remove the first occurrence of -YYMMDD (with optional trailing hyphen)
+    name = re.sub(r'-\d{6}(-|$)', r'\1', name, count=1)  # Remove -YYMMDD, keep what follows
+
+    # Clean up multiple spaces/hyphens that may result from removals
+    name = re.sub(r'[-\s]+', ' ', name)     # Replace multiple hyphens/spaces with single space
+    name = name.strip()                      # Remove leading/trailing spaces
+
+    # Replace remaining hyphens and underscores with spaces
+    name = name.replace('-', ' ').replace('_', ' ')
+    # Capitalize each word
+    name = ' '.join(word.capitalize() for word in name.split())
+
+    # Special handling: capitalize first 3 letters (e.g., "Wkb" -> "WKB")
+    if len(name) >= 3:
+        name = name[:3].upper() + name[3:]
+    elif len(name) > 0:
+        name = name.upper()
+
+    return name or filename
+
+def extract_metadata_from_image(image_path: Path) -> dict:
+    """
+    Extract EXIF and IPTC metadata from source image.
+    Returns dict with 'exif' and 'iptc' keys.
+    """
+    metadata = {'exif': None, 'iptc': {}}
+
+    # Extract EXIF data
+    if PIEXIF_AVAILABLE:
+        try:
+            exif_dict = piexif.load(str(image_path))
+            if exif_dict and any(exif_dict.values()):
+                metadata['exif'] = exif_dict
+        except Exception as e:
+            # Silently fail for images without EXIF
+            pass
+
+    # Extract IPTC data
+    if IPTC_AVAILABLE:
+        try:
+            iptc = IPTCInfo(str(image_path), force=True, inp_charset='utf-8')
+            # Extract common IPTC fields
+            if iptc:
+                if hasattr(iptc, 'data') and iptc.data:
+                    # Caption/Description
+                    if 120 in iptc.data:
+                        metadata['iptc']['caption'] = iptc.data[120].decode('utf-8', errors='ignore')
+                    # Copyright
+                    if 116 in iptc.data:
+                        metadata['iptc']['copyright'] = iptc.data[116].decode('utf-8', errors='ignore')
+                    # Author/Creator
+                    if 80 in iptc.data:
+                        metadata['iptc']['author'] = iptc.data[80].decode('utf-8', errors='ignore')
+                    # Keywords
+                    if 25 in iptc.data:
+                        keywords = iptc.data[25]
+                        if isinstance(keywords, (list, tuple)):
+                            metadata['iptc']['keywords'] = [k.decode('utf-8', errors='ignore') if isinstance(k, bytes) else k for k in keywords]
+        except Exception as e:
+            # Silently fail for images without IPTC
+            pass
+
+    return metadata
+
+def apply_metadata_to_image(image: Image.Image, metadata: dict, fallback_caption: str = None,
+                            preserve_metadata: bool = True, use_filename_fallback: bool = True) -> Image.Image:
+    """
+    Apply metadata to output image.
+    If preserve_metadata is True, applies existing metadata.
+    If use_filename_fallback is True and no caption exists, uses fallback_caption.
+    """
+    if not preserve_metadata:
+        return image
+
+    # Handle IPTC caption with fallback first
+    iptc_data = metadata.get('iptc', {}).copy()
+    if use_filename_fallback and not iptc_data.get('caption') and fallback_caption:
+        iptc_data['caption'] = fallback_caption
+        print(f"  📝 Fallback-Caption: {fallback_caption}")
+
+    # Prepare EXIF data
+    exif_bytes = None
+    if PIEXIF_AVAILABLE:
+        try:
+            # Start with existing EXIF or create new
+            if metadata.get('exif'):
+                exif_dict = metadata['exif'].copy()
+            else:
+                exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
+
+            # Clean up EXIF data (remove thumbnail if too large, can cause issues)
+            if '1st' in exif_dict:
+                exif_dict['1st'] = {}
+            if 'thumbnail' in exif_dict:
+                exif_dict['thumbnail'] = None
+
+            # Add caption to EXIF ImageDescription (tag 270) for better compatibility
+            # This makes the caption visible in WebP/PNG/AVIF
+            if iptc_data.get('caption'):
+                exif_dict['0th'][piexif.ImageIFD.ImageDescription] = iptc_data['caption'].encode('utf-8')
+                print(f"  📝 EXIF ImageDescription: {iptc_data['caption']}")
+
+            # Add copyright to EXIF Copyright (tag 33432)
+            if iptc_data.get('copyright'):
+                exif_dict['0th'][piexif.ImageIFD.Copyright] = iptc_data['copyright'].encode('utf-8')
+
+            # Add author to EXIF Artist (tag 315)
+            if iptc_data.get('author'):
+                exif_dict['0th'][piexif.ImageIFD.Artist] = iptc_data['author'].encode('utf-8')
+
+            exif_bytes = piexif.dump(exif_dict)
+        except Exception as e:
+            print(f"  ⚠️  Warnung: EXIF-Daten konnten nicht übernommen werden: {e}")
+            exif_bytes = None
+
+    # Store EXIF in image info for later use
+    if exif_bytes:
+        image.info['exif'] = exif_bytes
+
+    # Store IPTC info for reference (actual IPTC writing happens during save for JPEG)
+    if iptc_data:
+        image.info['iptc'] = iptc_data
+
+    return image
+
+
+# ------------------------------
 # Conversion
 # ------------------------------
 SUPPORTED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif"}
@@ -112,13 +268,36 @@ def parse_ext_list(s: str) -> Tuple[str, ...]:
 def ensure_output_dir(p: Path):
     p.mkdir(parents=True, exist_ok=True)
 
-def compute_new_size(img: Image.Image, target_width: int) -> Tuple[int, int]:
+def compute_new_size(img: Image.Image, target_width: int, allow_upscale: bool = False) -> Tuple[int, int]:
+    """
+    Compute new size for image, applying target_width to the longest dimension.
+    This ensures both portrait and landscape images fit within the target size.
+
+    Args:
+        img: PIL Image object
+        target_width: Maximum size for the longest dimension (width or height)
+        allow_upscale: If True, upscale smaller images to target size
+
+    Returns:
+        Tuple of (new_width, new_height)
+    """
     w, h = img.size
-    if w <= target_width:
-        # Don't upscale - keep original size
+
+    # Determine longest dimension
+    longest = max(w, h)
+
+    # If image is already smaller and upscaling is not allowed, keep original size
+    if longest <= target_width and not allow_upscale:
         return w, h
-    ratio = target_width / float(w)
-    return target_width, max(1, int(round(h * ratio)))
+
+    # Calculate ratio based on longest dimension
+    ratio = target_width / float(longest)
+
+    # Apply ratio to both dimensions
+    new_w = max(1, int(round(w * ratio)))
+    new_h = max(1, int(round(h * ratio)))
+
+    return new_w, new_h
 
 def load_image_fix_orientation(path: Path) -> Image.Image:
     im = Image.open(path)
@@ -171,28 +350,59 @@ def pil_mode_for_format(im: Image.Image, fmt: str, force_white_bg: bool = False)
 def save_image(im: Image.Image, out_path: Path, out_fmt: str, quality: int, force_white_bg: bool = False):
     out_fmt_upper = out_fmt.upper()
     params = {}
+
+    # Extract EXIF data if present in image info
+    exif_data = im.info.get('exif', None)
+
     if out_fmt_upper in {"JPG", "JPEG"}:
         params.update(dict(quality=quality, optimize=True, progressive=True, subsampling="4:2:0"))
+        if exif_data:
+            params['exif'] = exif_data
         im = pil_mode_for_format(im, "jpg", force_white_bg)
         im.save(out_path, format="JPEG", **params)
     elif out_fmt_upper == "PNG":
         # PNG "quality" not relevant; compress_level 0-9
+        if exif_data:
+            params['exif'] = exif_data
         im = pil_mode_for_format(im, "png", force_white_bg)
         params.update(dict(compress_level=6))
         im.save(out_path, format="PNG", **params)
     elif out_fmt_upper == "WEBP":
+        if exif_data:
+            params['exif'] = exif_data
         im = pil_mode_for_format(im, "webp", force_white_bg)
         params.update(dict(quality=quality, method=6))
         im.save(out_path, format="WEBP", **params)
     elif out_fmt_upper == "AVIF":
         if not AVIF_AVAILABLE:
             raise RuntimeError("AVIF wird nicht unterstützt (pillow-avif-plugin nicht installiert).")
+        if exif_data:
+            params['exif'] = exif_data
         im = pil_mode_for_format(im, "avif", force_white_bg)
         # pillow-avif-plugin uses 'quality'
         params.update(dict(quality=quality))
         im.save(out_path, format="AVIF", **params)
     else:
         raise ValueError(f"Unbekanntes Ausgabeformat: {out_fmt_upper}")
+
+    # Write IPTC data if present (post-save)
+    # Note: IPTC only fully supported in JPEG. For WebP/PNG/AVIF, EXIF is used.
+    iptc_data = im.info.get('iptc')
+    if iptc_data and IPTC_AVAILABLE and out_fmt_upper in {"JPG", "JPEG"}:
+        try:
+            iptc_info = IPTCInfo(str(out_path), force=True, inp_charset='utf-8')
+            if 'caption' in iptc_data:
+                iptc_info['caption/abstract'] = iptc_data['caption']
+            if 'copyright' in iptc_data:
+                iptc_info['copyright notice'] = iptc_data['copyright']
+            if 'author' in iptc_data:
+                iptc_info['by-line'] = iptc_data['author']
+            if 'keywords' in iptc_data:
+                iptc_info['keywords'] = iptc_data['keywords']
+            iptc_info.save()
+        except Exception as e:
+            # Silently fail if IPTC writing fails
+            pass
 
 def page_suffix(idx: int) -> str:
     """Generate page suffix for multi-page PDFs: -p001, -p002, ..."""
@@ -241,16 +451,32 @@ def convert_image_file(
     prefix: str = "",
     overwrite: bool = False,
     force_white_bg: bool = False,
+    preserve_metadata: bool = True,
+    use_filename_fallback: bool = True,
 ):
+    # Extract metadata from source image
+    metadata = extract_metadata_from_image(src_path) if preserve_metadata else {'exif': None, 'iptc': {}}
+
+    # Load and process image
     im = load_image_fix_orientation(src_path)
     w, h = compute_new_size(im, target_width)
     if (w, h) != im.size:
         im = im.resize((w, h), Image.LANCZOS)
 
+    # Generate output filename
     base_slug = wp_slugify(src_path.stem)
+    base_slug_without_prefix = base_slug  # Save for caption generation before adding prefix
     base_slug = ensure_prefix(base_slug, prefix)
     ext = "." + out_fmt.lower().replace("jpeg", "jpg")
     out_path = unique_target_path(out_dir, base_slug, ext, taken, overwrite)
+
+    # Prepare fallback caption from slugified filename (without prefix)
+    fallback_caption = filename_to_readable(base_slug_without_prefix) if use_filename_fallback else None
+
+    # Apply metadata to image
+    im = apply_metadata_to_image(im, metadata, fallback_caption, preserve_metadata, use_filename_fallback)
+
+    # Save image with metadata
     save_image(im, out_path, out_fmt, quality, force_white_bg)
     print(f"OK: {src_path.name}  ->  {out_path.name}")
 
@@ -265,35 +491,58 @@ def convert_pdf_file(
     prefix: str = "",
     overwrite: bool = False,
     force_white_bg: bool = False,
+    preserve_metadata: bool = True,
+    use_filename_fallback: bool = True,
 ):
-    if not PYMUPDF_AVAILABLE:
+    if not PDF2IMAGE_AVAILABLE:
         raise RuntimeError(
-            "PDF-Konvertierung benötigt PyMuPDF (pymupdf). Bitte mit `pip install pymupdf` installieren."
+            "PDF-Konvertierung benötigt pdf2image und Poppler. Bitte mit `pip install pdf2image` installieren.\n"
+            "Windows: Poppler-Binaries von https://github.com/oschwartz10612/poppler-windows/releases/ herunterladen.\n"
+            "Linux: sudo apt-get install poppler-utils\n"
+            "macOS: brew install poppler"
         )
-    doc = fitz.open(src_path)
+
     base_slug = wp_slugify(src_path.stem)
+    base_slug_without_prefix = base_slug  # Save for caption generation before adding prefix
     base_slug = ensure_prefix(base_slug, prefix)
     ext = "." + out_fmt.lower().replace("jpeg", "jpg")
 
-    for i, page in enumerate(doc, start=1):
-        # Render
-        mat = fitz.Matrix(pdf_zoom, pdf_zoom)
-        pix = page.get_pixmap(matrix=mat, alpha=True)
-        mode = "RGBA" if pix.alpha else "RGB"
-        im = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
+    # Calculate DPI from zoom factor (72 DPI is base)
+    dpi = int(72 * pdf_zoom)
 
-        # Resize
-        w, h = compute_new_size(im, target_width)
+    # Convert PDF to images using Poppler (proper CMYK → sRGB conversion)
+    # Poppler handles color space conversion correctly, unlike PyMuPDF
+    try:
+        images = convert_from_path(
+            str(src_path),
+            dpi=dpi,
+            fmt='RGB',  # Force RGB output (handles CMYK conversion properly)
+        )
+    except Exception as e:
+        raise RuntimeError(f"PDF-Konvertierung fehlgeschlagen: {e}\n"
+                         f"Stelle sicher, dass Poppler installiert ist.")
+
+    # Process each page
+    for i, im in enumerate(images, start=1):
+        # Resize (allow upscaling for PDFs to ensure consistent output width)
+        w, h = compute_new_size(im, target_width, allow_upscale=True)
         if (w, h) != im.size:
             im = im.resize((w, h), Image.LANCZOS)
 
         # Add page suffix to base slug for multi-page PDFs
         base_with_page = f"{base_slug}{page_suffix(i)}"
         out_path = unique_target_path(out_dir, base_with_page, ext, taken, overwrite)
+
+        # Prepare fallback caption from slugified filename (without page number or prefix)
+        fallback_caption = filename_to_readable(base_slug_without_prefix) if use_filename_fallback else None
+
+        # Create minimal metadata for PDF pages
+        metadata = {'exif': None, 'iptc': {}}
+        im = apply_metadata_to_image(im, metadata, fallback_caption, preserve_metadata, use_filename_fallback)
+
+        # Save image with metadata
         save_image(im, out_path, out_fmt, quality, force_white_bg)
         print(f"OK: {src_path.name} [Seite {i}]  ->  {out_path.name}")
-
-    doc.close()
 
 
 def should_skip_directory(dir_path: Path, exclude_patterns: str) -> bool:
@@ -344,6 +593,8 @@ def walk_and_convert(
     filename_pattern: str = "",
     overwrite: bool = False,
     force_white_bg: bool = False,
+    preserve_metadata: bool = True,
+    use_filename_fallback: bool = True,
 ):
     ensure_output_dir(out_dir)
 
@@ -376,12 +627,14 @@ def walk_and_convert(
             if ext in SUPPORTED_PDF_EXTS:
                 convert_pdf_file(
                     src, out_dir, out_fmt, target_width, quality, taken,
-                    pdf_zoom=pdf_zoom, prefix=prefix, overwrite=overwrite, force_white_bg=force_white_bg
+                    pdf_zoom=pdf_zoom, prefix=prefix, overwrite=overwrite, force_white_bg=force_white_bg,
+                    preserve_metadata=preserve_metadata, use_filename_fallback=use_filename_fallback
                 )
             elif ext in SUPPORTED_IMAGE_EXTS:
                 convert_image_file(
                     src, out_dir, out_fmt, target_width, quality, taken,
-                    prefix=prefix, overwrite=overwrite, force_white_bg=force_white_bg
+                    prefix=prefix, overwrite=overwrite, force_white_bg=force_white_bg,
+                    preserve_metadata=preserve_metadata, use_filename_fallback=use_filename_fallback
                 )
             else:
                 print(f"Übersprungen (nicht unterstützt): {src.name}")
@@ -464,11 +717,11 @@ def main():
         if proceed != "y":
             sys.exit(4)
 
-    target_width_str = ask("Ziel-Bildbreite in Pixel (Höhe proportional)", "1920")
+    target_width_str = ask("Maximale Größe der längsten Seite in Pixel (Breite oder Höhe)", "1920")
     try:
         target_width = max(1, int(target_width_str))
     except ValueError:
-        print("Fehler: Zielbreite muss eine Ganzzahl sein.")
+        print("Fehler: Maximale Größe muss eine Ganzzahl sein.")
         sys.exit(5)
 
     quality_default = "80" if out_fmt in {"webp", "jpg", "avif"} else "0"
@@ -479,12 +732,34 @@ def main():
         print("Fehler: Qualität muss 0-100 sein.")
         sys.exit(6)
 
-    pdf_zoom_str = ask("PDF-Render-Zoom (1.0 ≈ 72 DPI, 2.0 ≈ 144 DPI)", "2.0")
+    pdf_zoom_str = ask("PDF-Render-Zoom (1.0 = 72 DPI, 2.0 = 144 DPI, 3.0 = 216 DPI) - höher = schärfer", "3.0")
     try:
         pdf_zoom = max(0.1, float(pdf_zoom_str))
+        calculated_dpi = int(72 * pdf_zoom)
+        print(f"  → PDF wird mit {calculated_dpi} DPI gerendert")
     except ValueError:
         print("Fehler: PDF-Zoom muss Zahl sein.")
         sys.exit(7)
+
+    # Ask for metadata options
+    metadata_choice = ask("Metadaten (EXIF/IPTC) aus Quellbildern übernehmen? (y/n)", "y").lower()
+    preserve_metadata = metadata_choice == "y"
+    if preserve_metadata:
+        print("  → Metadaten werden übernommen")
+        if not PIEXIF_AVAILABLE or not IPTC_AVAILABLE:
+            print("  ⚠️  Warnung: Metadaten-Bibliotheken nicht installiert (piexif, iptcinfo3)")
+            print("      Installiere mit: pip install piexif iptcinfo3")
+    else:
+        print("  → Keine Metadaten werden übernommen")
+
+    filename_fallback_choice = "n"
+    if preserve_metadata:
+        filename_fallback_choice = ask("Dateinamen als Bildunterschrift verwenden, wenn keine Metadaten vorhanden? (y/n)", "y").lower()
+    use_filename_fallback = filename_fallback_choice == "y"
+    if use_filename_fallback:
+        print("  → Dateinamen werden als Fallback für Bildunterschriften verwendet")
+    else:
+        print("  → Kein Fallback für Bildunterschriften")
 
     print("\nStarte Verarbeitung …\n")
     walk_and_convert(
@@ -500,6 +775,8 @@ def main():
         filename_pattern=filename_pattern,
         overwrite=overwrite,
         force_white_bg=force_white_bg,
+        preserve_metadata=preserve_metadata,
+        use_filename_fallback=use_filename_fallback,
     )
     print("\nFertig.")
 
