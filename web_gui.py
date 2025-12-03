@@ -686,6 +686,10 @@ with gr.Blocks(
 
 
 if __name__ == "__main__":
+    # Ensure UTF-8 encoding for console (Windows compatibility)
+    if sys.platform == 'win32':
+        sys.stdout.reconfigure(encoding='utf-8')
+
     print("🌐 Starte Gradio Web Interface...")
     print("📂 Arbeitsverzeichnis:", Path.cwd())
     print("\n" + "="*50)

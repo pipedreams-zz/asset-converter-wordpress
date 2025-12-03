@@ -1,2 +1,2 @@
-# Additional dependencies for web GUI
-gradio>=4.0.0
+# Additional dependencies for web GUI (Gradio 4.x - stable version, 6.x has major performance issues)
+gradio==4.44.1
