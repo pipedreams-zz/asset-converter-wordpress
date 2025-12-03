@@ -270,7 +270,10 @@ batch_convert_wp/
 - **pillow-avif-plugin**: AVIF format support
 - **piexif**: EXIF metadata handling
 - **iptcinfo3**: IPTC metadata handling
-- **gradio**: Web GUI (optional)
+- **gradio**: Web GUI (optional, pinned to 4.44.1)
+  - **Important**: Gradio 6.x has severe performance regressions (100x+ slower) and UI bugs
+  - The project uses Gradio 4.44.1 for optimal performance and stability
+  - Experimental Gradio 6.x work is preserved in the `gradio-6-upgrade` branch for future reference
 
 ### Performance Tips
 - **PDF Zoom**: Higher values (3.0-4.0) produce sharper PDFs but larger files. Default 3.0 (216 DPI) is recommended for web use
