@@ -75,11 +75,22 @@ This will:
 **Features:**
 - Visual folder selection with browse buttons (for local access)
 - **Network access supported**: Access from other machines on your network at `http://<server-ip>:7860`
-- Remote users enter server paths directly (browse button opens dialog on server)
 - Real-time conversion status display
 - Light/dark mode toggle
 - All CLI features accessible through the GUI
 - Responsive design with monochrome theme
+
+**Path input for remote / Mac users:**
+
+The browse button opens a folder dialog **on the server**, not on the client machine. Remote users — especially Mac users — should type or paste the path directly into the text field. The following formats are automatically detected and converted to Windows UNC paths:
+
+| Input format | Example | Notes |
+|---|---|---|
+| Windows UNC | `\\spectre.ac.rendertaxi.net\pvma\project` | Used directly as-is |
+| Mac "Connect to Server" URL | `smb://spectre.ac.rendertaxi.net/pvma/project` | Converted automatically |
+| Mac Finder drag & drop | `/Volumes/pvma/project` | Converted automatically (server: `spectre.ac.rendertaxi.net`) |
+
+Mac users can drag a folder directly from the Finder sidebar or a Finder window into the path field — the `/Volumes/...` path is automatically translated to the correct UNC path on the server.
 
 <!-- Screenshot placeholders - Add your screenshots here -->
 #### Screenshots

@@ -13,6 +13,7 @@ import io
 from contextlib import redirect_stdout
 import time
 import threading
+from urllib.parse import unquote
 
 # Import all conversion functions from the main script
 from batch_convert_assets import (
@@ -22,6 +23,32 @@ from batch_convert_assets import (
     AVIF_AVAILABLE,
     PDF2IMAGE_AVAILABLE,
 )
+
+
+SMB_SERVER = "spectre.ac.rendertaxi.net"
+
+def normalize_path_input(path: str) -> str:
+    """
+    Convert Mac path formats to UNC paths for Windows.
+
+    Handles two cases Mac users produce:
+    1. SMB URL (copied from Finder "Connect to Server" or Go menu):
+       smb://spectre.ac.rendertaxi.net/pvma/folder -> \\\\spectre.ac.rendertaxi.net\\pvma\\folder
+    2. /Volumes path (dragged from Finder into the GUI):
+       /Volumes/pvma/folder -> \\\\spectre.ac.rendertaxi.net\\pvma\\folder
+
+    Also decodes URL-encoded characters (e.g. %20 -> space).
+    """
+    if not path:
+        return path
+    path = path.strip()
+    if path.lower().startswith("smb://"):
+        path = unquote(path[6:])   # strip "smb://" and decode %xx
+        path = "\\\\" + path.replace("/", "\\")
+    elif path.startswith("/Volumes/"):
+        path = path[len("/Volumes/"):]   # strip "/Volumes/"
+        path = "\\\\" + SMB_SERVER + "\\" + path.replace("/", "\\")
+    return path
 
 
 def pick_folder(current_path: str = None) -> str:
@@ -102,6 +129,10 @@ def convert_batch(
     Captures output while also displaying to console.
     """
     try:
+        # Normalize SMB URLs to UNC paths (for Mac users pasting from Finder)
+        source_dir = normalize_path_input(source_dir)
+        output_dir = normalize_path_input(output_dir)
+
         # Validate source directory
         in_dir = Path(source_dir).expanduser().resolve()
         if not in_dir.exists() or not in_dir.is_dir():
@@ -434,8 +465,14 @@ with gr.Blocks(
 
         <p>Konvertiere Bilder und PDFs in web-optimierte Formate mit WordPress-freundlichen Dateinamen.</p>
 
-        > **💡 Hinweis für Remote-Zugriff:** Bei Zugriff über Netzwerk öffnet "Durchsuchen" den Dialog auf dem **Server**.
-        > Geben Sie stattdessen den Pfad **auf dem Server** direkt in die Textfelder ein (z.B. `/pfad/zum/ordner` oder `C:\\Ordner\\Projekt`).
+        > **💡 Hinweis für Remote-Zugriff:** Bei Zugriff über Netzwerk öffnet „Durchsuchen" den Dialog auf dem **Server**, nicht auf Ihrem Gerät.
+        > Geben Sie den Pfad stattdessen direkt in das Textfeld ein – folgende Formate werden automatisch erkannt und umgewandelt:
+        >
+        > | Eingabe | Erkannt als |
+        > |---|---|
+        > | `\\\\server\\share\\ordner` | Windows UNC-Pfad (direkt verwendbar) |
+        > | `smb://spectre.ac.rendertaxi.net/share/ordner` | Mac „Gehe zu Server"-URL → wird automatisch umgewandelt |
+        > | `/Volumes/share/ordner` | Mac Finder-Drag & Drop → wird automatisch umgewandelt |
         """
     )
 
@@ -671,8 +708,11 @@ with gr.Blocks(
         """
         ---
         💡 **Tipps:**
-        - **Lokaler Zugriff:** "Durchsuchen"-Button öffnet Ordner-Dialog
-        - **Remote-Zugriff:** Pfade direkt eingeben (immer **Server-Pfade**, nicht Client-Pfade!)
+        - **Lokaler Zugriff:** „Durchsuchen"-Button öffnet Ordner-Dialog auf dem Server
+        - **Mac-Benutzer (Netzwerk):** Pfad direkt eingeben oder per Drag & Drop aus dem Finder – folgende Formate werden automatisch umgewandelt:
+          - `smb://spectre.ac.rendertaxi.net/share/ordner` → UNC-Pfad (aus „Gehe zu Server" oder Finder-Menü)
+          - `/Volumes/share/ordner` → UNC-Pfad (Drag & Drop aus Finder-Seitenleiste)
+        - **Wichtig:** Es zählt immer der Pfad **auf dem Server**, nicht auf dem eigenen Gerät
         - Quellordner muss angegeben werden (kein Standard mehr)
         - Prefix wird automatisch normalisiert (Kleinbuchstaben, alphanumerisch)
         - Bei Kollisionen werden Dateien mit `-01`, `-02`, ... erstellt (falls nicht überschreiben)
